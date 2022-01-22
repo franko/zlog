@@ -100,7 +100,7 @@ void zlog_init_stderr(void)
     zlog_fout = stderr;
 }
 
-static void* zlog_buffer_flush_thread()
+static void* zlog_buffer_flush_thread(void *_unused)
 {
     struct timeval tv;
     time_t lasttime;
@@ -185,17 +185,13 @@ void zlogf_time(int msg_level, char const * fmt, ...)
     if(msg_level <= ZLOG_LOG_LEVEL){
         char timebuf[ZLOG_BUFFER_TIME_STR_MAX_LEN];
         struct timeval tv;
-        //time_t curtime;
+        struct tm *tm_struct;
         char* buffer = NULL;
-
-        // time_t ltime;
-        // ltime = time(NULL);
 
         va_list va;
 
         gettimeofday(&tv, NULL);
-        //curtime=tv.tv_sec;
-        struct tm *tm_struct = localtime(&tv.tv_sec);
+        tm_struct = localtime(&tv.tv_sec);
         snprintf(timebuf, ZLOG_BUFFER_TIME_STR_MAX_LEN, "%d:%02d:%d", tm_struct->tm_hour, tm_struct->tm_min, tm_struct->tm_sec);
         buffer = zlog_get_buffer();
         snprintf(buffer, ZLOG_BUFFER_STR_MAX_LEN, "[%s.%06lds] ", timebuf, tv.tv_usec);
@@ -216,15 +212,13 @@ void zlog_time(int msg_level, char* filename, int line, char const * fmt, ...)
     if(msg_level <= ZLOG_LOG_LEVEL){
         static char timebuf[ZLOG_BUFFER_TIME_STR_MAX_LEN];
         struct timeval tv;
-        time_t curtime;
+        struct tm *tm_struct;
         char* buffer = NULL;
 
         va_list va;
 
         gettimeofday(&tv, NULL);
-        curtime=tv.tv_sec;
-        struct tm *tm_struct = localtime(&tv.tv_sec);
-        snprintf(timebuf, ZLOG_BUFFER_TIME_STR_MAX_LEN, "%ld", curtime);
+        tm_struct = localtime(&tv.tv_sec);
         snprintf(timebuf, ZLOG_BUFFER_TIME_STR_MAX_LEN, "%d:%02d:%d", tm_struct->tm_hour, tm_struct->tm_min, tm_struct->tm_sec);
 
         buffer = zlog_get_buffer();
