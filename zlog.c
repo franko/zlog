@@ -14,8 +14,41 @@
 #include <pthread.h>
 #include <errno.h>
 
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
 #include "zlog-config.h"
 #include "zlog.h"
+
+#ifdef _WIN32
+
+// Adapted from: https://stackoverflow.com/questions/10905892/equivalent-of-gettimeday-for-windows
+static int zlog_write_timestamp(char *buffer, char *buffer_end) {
+    const size_t size = buffer_end - buffer;
+    char timebuf[ZLOG_BUFFER_TIME_STR_MAX_LEN];
+    SYSTEMTIME  system_time;
+
+    GetLocalTime(&system_time);
+
+    snprintf(timebuf, ZLOG_BUFFER_TIME_STR_MAX_LEN, "%d:%02d:%d", system_time.wHour, system_time.wMinute, system_time.wSecond);
+    snprintf(buffer, size, "[%s.%06lds] ", timebuf, (long) system_time.wMilliseconds * 1000);
+    return strlen(timebuf) + 11; // space for time
+}
+#else
+static int zlog_write_timestamp(char *buffer, char *buffer_end) {
+    const size_t size = buffer_end - buffer;
+    char timebuf[ZLOG_BUFFER_TIME_STR_MAX_LEN];
+    struct timeval tv;
+    struct tm *tm;
+
+    gettimeofday(&tv, NULL);
+    tm = localtime(&tv.tv_sec);
+    snprintf(timebuf, ZLOG_BUFFER_TIME_STR_MAX_LEN, "%d:%02d:%d", tm->tm_hour, tm->tm_min, tm->tm_sec);
+    snprintf(buffer, size, "[%s.%06lds] ", timebuf, tv.tv_usec);
+    return strlen(timebuf) + 11; // space for time
+}
+#endif
 
 // --------------------------------------------------------------
 // zlog utilities
@@ -167,9 +200,9 @@ inline void zlogf(int msg_level, char const * fmt, ...)
         va_list va;
         char* buffer = NULL;
 
-        va_start(va, fmt);
         buffer = zlog_get_buffer();
 
+        va_start(va, fmt);
         vsnprintf(buffer, ZLOG_BUFFER_STR_MAX_LEN, fmt, va);
         zlog_finish_buffer();
         va_end(va);
@@ -183,25 +216,27 @@ void zlogf_time(int msg_level, char const * fmt, ...)
 #endif
 
     if(msg_level <= ZLOG_LOG_LEVEL){
-        char timebuf[ZLOG_BUFFER_TIME_STR_MAX_LEN];
-        struct timeval tv;
-        struct tm *tm_struct;
-        char* buffer = NULL;
-
         va_list va;
+        char *buffer = zlog_get_buffer();
+        char * const buffer_end = buffer + ZLOG_BUFFER_STR_MAX_LEN;
 
-        gettimeofday(&tv, NULL);
-        tm_struct = localtime(&tv.tv_sec);
-        snprintf(timebuf, ZLOG_BUFFER_TIME_STR_MAX_LEN, "%d:%02d:%d", tm_struct->tm_hour, tm_struct->tm_min, tm_struct->tm_sec);
-        buffer = zlog_get_buffer();
-        snprintf(buffer, ZLOG_BUFFER_STR_MAX_LEN, "[%s.%06lds] ", timebuf, tv.tv_usec);
-        buffer += strlen(timebuf) + 11; // space for time
+        buffer += zlog_write_timestamp(buffer, buffer_end);
 
         va_start(va, fmt);
-        vsnprintf(buffer, ZLOG_BUFFER_STR_MAX_LEN, fmt, va);
+        vsnprintf(buffer, buffer_end - buffer, fmt, va);
         zlog_finish_buffer();
         va_end(va);
     }
+}
+
+static int zlog_write_location(char *buffer, char *buffer_end, char *filename, int line) {
+    const size_t size = buffer_end - buffer;
+    int write_size = snprintf(buffer, size, "[@%s:%d] ", filename, line);
+    if (write_size >= 0 && (size_t) write_size >= size) {
+        write_size = size - 1;
+        buffer[write_size] = 0;
+    }
+    return write_size;
 }
 
 void zlog_time(int msg_level, char* filename, int line, char const * fmt, ...)
@@ -210,23 +245,15 @@ void zlog_time(int msg_level, char* filename, int line, char const * fmt, ...)
     return ;
 #endif
     if(msg_level <= ZLOG_LOG_LEVEL){
-        static char timebuf[ZLOG_BUFFER_TIME_STR_MAX_LEN];
-        struct timeval tv;
-        struct tm *tm_struct;
-        char* buffer = NULL;
-
         va_list va;
+        char *buffer = zlog_get_buffer();
+        char * const buffer_end = buffer + ZLOG_BUFFER_STR_MAX_LEN;
 
-        gettimeofday(&tv, NULL);
-        tm_struct = localtime(&tv.tv_sec);
-        snprintf(timebuf, ZLOG_BUFFER_TIME_STR_MAX_LEN, "%d:%02d:%d", tm_struct->tm_hour, tm_struct->tm_min, tm_struct->tm_sec);
-
-        buffer = zlog_get_buffer();
-        snprintf(buffer, ZLOG_BUFFER_STR_MAX_LEN, "[%s.%06lds] [@%s:%d] ", timebuf, tv.tv_usec, filename, line);
-        buffer += strlen(buffer); // print at most 5 digit of line
+        buffer += zlog_write_timestamp(buffer, buffer_end);
+        buffer += zlog_write_location(buffer, buffer_end, filename, line);
 
         va_start(va, fmt);
-        vsnprintf(buffer, ZLOG_BUFFER_STR_MAX_LEN, fmt, va);
+        vsnprintf(buffer, buffer_end - buffer, fmt, va);
         zlog_finish_buffer();
         va_end(va);
     }
@@ -238,15 +265,14 @@ void zlog(int msg_level, char* filename, int line, char const * fmt, ...)
     return ;
 #endif
     if(msg_level <= ZLOG_LOG_LEVEL){
-        char* buffer = NULL;
         va_list va;
+        char *buffer = zlog_get_buffer();
+        char *const buffer_end = buffer + ZLOG_BUFFER_STR_MAX_LEN;
 
-        buffer = zlog_get_buffer();
-        snprintf(buffer, ZLOG_BUFFER_STR_MAX_LEN, "[@%s:%d] ", filename, line);
-        buffer += strlen(buffer);
+        buffer += zlog_write_location(buffer, buffer_end, filename, line);
+
         va_start(va, fmt);
-
-        vsnprintf(buffer, ZLOG_BUFFER_STR_MAX_LEN, fmt, va);
+        vsnprintf(buffer, buffer_end - buffer, fmt, va);
         zlog_finish_buffer();
         va_end(va);
     }
